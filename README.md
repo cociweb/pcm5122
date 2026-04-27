@@ -2,6 +2,10 @@
 
 The PCM5122 is a high-performance audio DAC (Digital-to-Analog Converter) designed for portable and automotive audio applications. This ESPHome external component provides easy integration of the PCM5122 DAC with ESP32-based systems for professional audio output.
 
+# Why
+
+I've created a [HiFi-ESP32-Plus](https://sonocotta.com/hifi-esp32-and-hifi-esp32s3/) and [Amped-ESP32-Plus](https://sonocotta.com/amped-esp32/) boards, that uses this DAC, and I wanted to integrate this DAC into the Home Assistant. Even though it is a fairly old DAC, and TI doesn't update they tooling to support it properly, it is still great chip for the price 
+
 ## Usage: PCM5122 Component from GitHub
 
 This component requires ESPHome version 2025.7.0 or later.
