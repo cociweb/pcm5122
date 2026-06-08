@@ -76,6 +76,14 @@ namespace esphome
       if (!this->set_state_(CTRL_PLAY))
         return false;
 
+      // Read and cache the current process flow from hardware
+      uint8_t flow;
+      if (this->pcm5122_read_byte_(PCM51XX_REG_PROC_FLOW, &flow)) {
+        this->pcm5122_state_.process_flow = flow;
+      } else {
+        this->pcm5122_state_.process_flow = PCM51XX_PROC_FLOW_1;
+      }
+
       // initialise to now
       this->start_time_ = millis();
       return true;
@@ -328,6 +336,42 @@ namespace esphome
 
       this->pcm5122_state_.mixer_mode = mode;
       ESP_LOGD(TAG, "%s: %s", MIXER_MODE, MIXER_MODE_TEXT[this->pcm5122_state_.mixer_mode]);
+      return true;
+    }
+
+    bool Pcm5122Component::set_process_flow(uint8_t flow)
+    {
+      // Validate flow value (only allow documented flows)
+      if (flow != PCM51XX_PROC_FLOW_1 &&
+          flow != PCM51XX_PROC_FLOW_2 &&
+          flow != PCM51XX_PROC_FLOW_3 &&
+          flow != PCM51XX_PROC_FLOW_5 &&
+          flow != PCM51XX_PROC_FLOW_7) {
+        ESP_LOGE(TAG, "%s invalid process flow: %d", ERROR, flow);
+        return false;
+      }
+
+      // Enter standby before changing process flow to avoid audio glitches
+      if (!this->set_state_(CTRL_STBY)) {
+        ESP_LOGE(TAG, "%s enter standby for process flow change", ERROR);
+        return false;
+      }
+
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_PROC_FLOW, flow)) {
+        ESP_LOGE(TAG, "%s set process flow %d", ERROR, flow);
+        // Exit standby even on failure
+        this->set_state_(CTRL_PLAY);
+        return false;
+      }
+
+      // Exit standby — DSP picks up the new process flow atomically
+      if (!this->set_state_(CTRL_PLAY)) {
+        ESP_LOGE(TAG, "%s exit standby after process flow change", ERROR);
+        return false;
+      }
+
+      this->pcm5122_state_.process_flow = flow;
+      ESP_LOGD(TAG, "Process flow set to %d", flow);
       return true;
     }
 

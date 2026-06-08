@@ -43,6 +43,26 @@ namespace esphome
     #define PCM5122_REG_PAGE_SET 0x00
     #define PCM5122_CFG_META_DELAY 0xFF
 
+    /* ------------------------------------------------------------------
+     * Register 43 (0x2B, page 0) — PDSP: Process flow selection
+     *
+     * Selects which signal processing path is active.
+     *
+     * PDSP[2:0] | Description
+     * ----------|-----------------------------------------------------------
+     *  001      | Flow 1 — FIR interpolation filter with de-emphasis
+     *  010      | Flow 2 — Low latency IIR interpolation filter
+     *  011      | Flow 3 — High attenuation FIR interpolation filter
+     *  101      | Flow 5 — Fixed process flow with configurable BQ parameters
+     *  111      | Flow 7 — Ringing-less low latency FIR interpolation filter
+     * ------------------------------------------------------------------*/
+    #define PCM51XX_REG_PROC_FLOW 0x2B
+    #define PCM51XX_PROC_FLOW_1 0x01u
+    #define PCM51XX_PROC_FLOW_2 0x02u
+    #define PCM51XX_PROC_FLOW_3 0x03u
+    #define PCM51XX_PROC_FLOW_5 0x05u
+    #define PCM51XX_PROC_FLOW_7 0x07u
+
     typedef struct
     {
       uint8_t offset;
