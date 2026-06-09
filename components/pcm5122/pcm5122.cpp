@@ -17,6 +17,11 @@ namespace esphome
     // maximum delay allowed in "pcm5122_minimal.h" used in configure_registers()
     static const uint8_t ESPHOME_MAXIMUM_DELAY = 5; // milliseconds
 
+    // Set to true once the DSP coefficient RAM has been written successfully.
+    // Prevents re-writing the coefficients on subsequent set_process_flow()
+    // calls at runtime — the PCM5122 coefficient RAM survives standby cycles.
+    static bool s_dsp_coeff_written = false;
+
     void Pcm5122Component::setup()
     {
       ESP_LOGCONFIG(TAG, "Running setup");
@@ -27,6 +32,25 @@ namespace esphome
         delay(10);
         this->enable_pin_->digital_write(true);
       }
+
+      // Reset DAC using PCM51XX_REG_RESET register
+      // Write 0x11 to reset register, then clear reset flags
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_RESET, 0x11)) {
+        ESP_LOGE(TAG, "%s reset PCM5122", ERROR);
+        this->error_code_ = CONFIGURATION_FAILED;
+        this->mark_failed();
+        return;
+      }
+      delay(100); // Allow reset to complete
+
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_RESET, 0x00)) {
+        ESP_LOGE(TAG, "%s clear reset flags", ERROR);
+        this->error_code_ = CONFIGURATION_FAILED;
+        this->mark_failed();
+        return;
+      }
+      
+      delay(100); // Allow part to stabilise
 
       if (!configure_registers_())
       {
@@ -41,28 +65,29 @@ namespace esphome
 
     bool Pcm5122Component::configure_registers_()
     {
-      uint16_t i = 0;
-      uint16_t counter = 0;
-      uint16_t number_configurations = sizeof(pcm51xx_init_seq) / sizeof(pcm51xx_init_seq[0]);
-
-      while (i < number_configurations)
       {
-        switch (pcm51xx_init_seq[i].offset)
+        // --- Write basic codec initialisation sequence ---
+        uint16_t reg_count = sizeof(pcm51xx_init_seq) / sizeof(pcm51xx_init_seq[0]);
+        for (uint16_t i = 0; i < reg_count; i++)
         {
-        case PCM5122_CFG_META_DELAY:
-          if (pcm51xx_init_seq[i].value > ESPHOME_MAXIMUM_DELAY)
-            return false;
-          delay(pcm51xx_init_seq[i].value);
-          break;
-        default:
-          if (!this->pcm5122_write_byte_(pcm51xx_init_seq[i].offset, pcm51xx_init_seq[i].value))
-            return false;
-          counter++;
-          break;
+            if (!this->pcm5122_write_byte_(pcm51xx_init_seq[i].offset, pcm51xx_init_seq[i].value))
+              return false;
         }
-        i++;
+        ESP_LOGD(TAG, "%s: wrote %d initialisation registers", __func__, reg_count);
       }
-      this->number_registers_configured_ = counter;
+
+      {
+        // --- Write DSP CRAM contents ---
+        uint16_t reg_count = sizeof(pcm51xx_dsp_coeff_seq) / sizeof(pcm51xx_dsp_coeff_seq[0]);
+        for (uint16_t i = 0; i < reg_count; i++)
+        {
+            if (!this->pcm5122_write_byte_(pcm51xx_dsp_coeff_seq[i].offset, pcm51xx_dsp_coeff_seq[i].value))
+              return false;
+        }
+        s_dsp_coeff_written = true;
+
+        ESP_LOGD(TAG, "%s: wrote %d DSP registers", __func__, reg_count);
+      }
 
       if (!this->set_deep_sleep_off_())
         return false;
@@ -115,8 +140,7 @@ namespace esphome
                       "  Maximum Volume: %idB\n"
                       "  Minimum Volume: %idB\n"
                       "  Mixer Mode: %s\n",
-  
-                      this->number_registers_configured_,
+
                       this->pcm5122_state_.analog_gain,
                       this->pcm5122_state_.volume_max,
                       this->pcm5122_state_.volume_min,

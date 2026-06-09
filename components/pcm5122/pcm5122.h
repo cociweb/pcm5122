@@ -94,8 +94,6 @@ namespace esphome
 
       uint16_t count_fast_updates_{0};
 
-      uint16_t number_registers_configured_{0};
-
       // initialised in loop
       uint32_t start_time_;
     };
