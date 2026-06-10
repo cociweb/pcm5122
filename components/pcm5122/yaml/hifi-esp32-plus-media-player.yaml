@@ -16,7 +16,7 @@ substitutions:
   pcm5122_enable_pin: GPIO13        # optional, to enable/disable the DAC (XSMT physical pin)
 
   # RGB LED
-  rgb_led_pin: GPIO12
+  # rgb_led_pin: GPIO12
   
   # # IR Receiver
   # ir_rx_pin: GPIO39
@@ -83,43 +83,6 @@ psram:
 network:
   enable_ipv6: true
 
-external_components:
-  # for production, use the released version
-  # - source: github://sonocotta/esphome-pcm5122
-  # for local development, use relative path
-  - source: ../..
-    components: [ pcm5122 ]
-    refresh: 0s
-
-i2c:
-  sda: ${i2c_sda_pin}
-  scl: ${i2c_scl_pin}
-  frequency: 400kHz
-  scan: true
-
-audio_dac:
-  - platform: pcm5122
-    id: external_dac
-    address: ${pcm5122_i2c_address}         # I2C address of the DAC, it is 0x4C n the HiFi-ESP32 Rev H, and 0x4D on the rev H1+
-    enable_pin: ${pcm5122_enable_pin}       # optional, to enable/disable the DAC (XSMT pin)
-    volume_max: 0dB                         # maximum volume range 0dB, can go up to +24dB
-    volume_min: -60dB                       # minimum volume range -60dB, can go down to -103dB
-    analog_gain: -6dB                       # or -6Db for 1V RMS output, default is 0dB = 2V RMS output
-    mixer_mode: STEREO                      # MIXER MODE: STEREO, STEREO_INVERSE, LEFT, RIGHT
-
-switch:
-  - platform: pcm5122
-    enable_dac:
-      name: Enable DAC
-      id: enable_dac
-      restore_mode: ALWAYS_OFF
-
-select:
-  - platform: pcm5122
-    process_flow:
-      name: PCM5122 Process Flow
-      id: pcm5122_process_flow
-
 # ===== Packages =====
 packages:
   esparagus_remote:
@@ -128,10 +91,12 @@ packages:
     files:
       - firmware/esphome/packages/audio.yaml
       - firmware/esphome/packages/audio-addon-external-dac.yaml
-      - firmware/esphome/packages/media-player.yaml
+      - firmware/esphome/packages/media-player-no-light.yaml
       - firmware/esphome/packages/media-player-addon-dac-enable.yaml
 
-      - firmware/esphome/packages/light.yaml
+      # - firmware/esphome/packages/light.yaml
       # - firmware/esphome/packages/ir-receiver.yaml
       # - firmware/esphome/packages/monitoring.yaml
       # - firmware/esphome/packages/monitoring-wifi.yaml
+
+  pcm5122_dac: !include pcm5122-dac.yaml
