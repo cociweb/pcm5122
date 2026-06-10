@@ -468,5 +468,121 @@ namespace esphome
       return true;
     }
 
+    // ======================== Biquad Coefficient Writing ========================
+
+    /*
+     * PCM5122 EQ BQ band address table.
+     * Each band: 5 coefficients × 4 bytes = 20 bytes.
+     * band 0..3: page 44 (0x2C), band 4..5: page 45 (0x2D).
+     */
+    static const struct {
+      uint8_t page;
+      uint8_t base_offset;
+    } BQ_BAND_ADDR[6] = {
+      {0x2C, 0x30},  /* band 0 (BQ1), c10..c14 */
+      {0x2C, 0x44},  /* band 1 (BQ2), c15..c19 */
+      {0x2C, 0x58},  /* band 2 (BQ3), c20..c24 */
+      {0x2C, 0x6C},  /* band 3 (BQ4), c25..c29 */
+      {0x2D, 0x08},  /* band 4 (BQ5), c30..c34 */
+      {0x2D, 0x1C},  /* band 5 (BQ6), c35..c39 */
+    };
+
+    /*
+     * Compute the exact (page, offset) for coefficient ci of a band.
+     * Uses the same formula as pcm51xx_bq_coeff_addr() in pcm51xx_bq_addr.h.
+     */
+    static void bq_coeff_addr_(uint8_t band, int ci, uint8_t *page_out, uint8_t *offset_out) {
+      uint16_t abs = (uint16_t)BQ_BAND_ADDR[band].base_offset + (uint16_t)(ci * 4);
+      if (abs >= 0x80u) {
+        *page_out   = (uint8_t)(BQ_BAND_ADDR[band].page + 1u);
+        *offset_out = (uint8_t)(abs - 0x78u);
+      } else {
+        *page_out   = BQ_BAND_ADDR[band].page;
+        *offset_out = (uint8_t)abs;
+      }
+    }
+
+    /*
+     * Convert float in range (-1, +1) to PCM5122 Q3.23 register format.
+     * Returns a 32-bit value where bits[31:8] contain the 24-bit coefficient,
+     * bits[7:0] are always 0x00.
+     */
+    static uint32_t float_to_q323_(float value) {
+      if (value > 0.9999999f) value = 0.9999999f;
+      if (value < -1.0f) value = -1.0f;
+      int32_t q = (int32_t)(value * (float)(1u << 23));
+      return (uint32_t)q << 8;
+    }
+
+    bool Pcm5122Component::write_bq_coefficients(uint8_t band, const float coeff_f[5]) {
+      if (band >= 6) {
+        ESP_LOGE(TAG, "Invalid BQ band: %d", band);
+        return false;
+      }
+
+      // Enter standby
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_STATE, CTRL_STBY)) {
+        ESP_LOGE(TAG, "Failed to enter standby for BQ write");
+        return false;
+      }
+
+      bool success = true;
+      uint8_t current_page = 0xFF;  // sentinel — force first page select
+
+      for (int ci = 0; ci < 5 && success; ci++) {
+        uint8_t pg, off;
+        bq_coeff_addr_(band, ci, &pg, &off);
+
+        // Select page if needed
+        if (pg != current_page) {
+          if (!this->set_page_(pg)) {
+            ESP_LOGE(TAG, "Failed to select page 0x%02x for BQ band %d ci %d", pg, band, ci);
+            success = false;
+            break;
+          }
+          current_page = pg;
+        }
+
+        // Convert coefficient to Q3.23 big-endian register format
+        uint32_t value = float_to_q323_(coeff_f[ci]);
+        uint8_t be[4] = {
+          (uint8_t)(value >> 24),
+          (uint8_t)(value >> 16),
+          (uint8_t)(value >>  8),
+          (uint8_t)(value),
+        };
+
+        // Write 4 bytes (MSByte first) to consecutive register addresses
+        for (int bi = 0; bi < 4 && success; bi++) {
+          if (!this->pcm5122_write_byte_(off + (uint8_t)bi, be[bi])) {
+            ESP_LOGE(TAG, "Failed to write BQ band %d ci %d byte %d", band, ci, bi);
+            success = false;
+          }
+        }
+
+        ESP_LOGD(TAG, "BQ band %d ci %d pg=0x%02x off=0x%02x wrote [0x%02x 0x%02x 0x%02x 0x%02x] (%.7f)",
+                 band, ci, pg, off, be[0], be[1], be[2], be[3], coeff_f[ci]);
+      }
+
+      // Restore page 0
+      if (!this->set_page_(PCM51XX_PAGE_ZERO)) {
+        ESP_LOGW(TAG, "Failed to restore page 0 after BQ write");
+      }
+
+      // Exit standby
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_STATE, CTRL_PLAY)) {
+        ESP_LOGE(TAG, "Failed to exit standby after BQ write");
+        return false;
+      }
+
+      if (!success) {
+        ESP_LOGE(TAG, "BQ coefficient write failed for band %d", band);
+        return false;
+      }
+
+      ESP_LOGD(TAG, "BQ band %d coefficients written successfully", band);
+      return true;
+    }
+
   } // namespace pcm5122
 } // namespace esphome

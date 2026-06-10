@@ -42,6 +42,9 @@ namespace esphome
       uint8_t get_process_flow() { return this->pcm5122_state_.process_flow; }
       bool set_process_flow(uint8_t flow);
 
+      // DSP biquad coefficient writing
+      bool write_bq_coefficients(uint8_t band, const float coeff_f[5]);
+
     protected:
       GPIOPin *enable_pin_{nullptr};
 

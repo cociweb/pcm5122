@@ -158,36 +158,26 @@ void EqBandGain::control(float value) {
   int ret = this->calculate_coefficients_(gain_db, &coeffs);
 
   if (ret == 0) {
-    // Log the coefficients in the PCM5122 register mapping format
-    // PCM5122 stores: b0, b1/2, b2, -a1/2, -a2
-    double reg_b0   = coeffs.b0;
-    double reg_b1_2 = coeffs.b1 / 2.0;
-    double reg_b2   = coeffs.b2;
-    double reg_a1_2 = -coeffs.a1 / 2.0;
-    double reg_a2   = -coeffs.a2;
+    // Convert to PCM5122 register format: b0, b1/2, b2, -a1/2, -a2
+    float reg_coeffs[5] = {
+      (float)coeffs.b0,           // b0
+      (float)(coeffs.b1 * 0.5),   // b1/2
+      (float)coeffs.b2,           // b2
+      (float)(-coeffs.a1 * 0.5),  // -a1/2
+      (float)(-coeffs.a2),        // -a2
+    };
 
     ESP_LOGD(TAG,
              "Band %d: gain=%.1fdB  type=%d  freq=%uHz  Q=%.2f  "
              "coeffs=[b0=%.7f  b1/2=%.7f  b2=%.7f  -a1/2=%.7f  -a2=%.7f]",
              this->band_ + 1, gain_db,
              this->filter_type_, this->frequency_, this->q_factor_,
-             reg_b0, reg_b1_2, reg_b2, reg_a1_2, reg_a2);
+             reg_coeffs[0], reg_coeffs[1], reg_coeffs[2], reg_coeffs[3], reg_coeffs[4]);
 
-    // Q3.23 wire format values for reference
-    auto to_q323 = [](double v) -> uint32_t {
-      const double scale = (double)(1u << 23);
-      if (v > 0.9999999) v = 0.9999999;
-      if (v < -1.0) v = -1.0;
-      int32_t q = (int32_t)(v * scale);
-      return (uint32_t)q << 8;
-    };
-
-    ESP_LOGD(TAG,
-             "Band %d: Q3.23 raw=[0x%08" PRIx32 "  0x%08" PRIx32
-             "  0x%08" PRIx32 "  0x%08" PRIx32 "  0x%08" PRIx32 "]",
-             this->band_ + 1,
-             to_q323(reg_b0), to_q323(reg_b1_2), to_q323(reg_b2),
-             to_q323(reg_a1_2), to_q323(reg_a2));
+    // Write coefficients to PCM5122 DSP RAM via I2C
+    if (!this->parent_->write_bq_coefficients(this->band_, reg_coeffs)) {
+      ESP_LOGW(TAG, "Band %d: failed to write coefficients to PCM5122", this->band_ + 1);
+    }
   } else {
     ESP_LOGW(TAG, "Band %d: coefficient calculation failed (gain=%.1fdB)",
              this->band_ + 1, gain_db);

@@ -57,6 +57,11 @@ namespace esphome
  *  101      | Flow 5 — Fixed process flow with configurable BQ parameters
  *  111      | Flow 7 — Ringing-less low latency FIR interpolation filter
  * ------------------------------------------------------------------*/
+#define PCM51XX_REG_PAGE_SELECT 0x00
+#define PCM51XX_REG_PMOD 0x02
+#define PCM51XX_PMOD_NORMAL 0x00
+#define PCM51XX_PMOD_STANDBY 0x10
+
 #define PCM51XX_REG_PROC_FLOW 0x2B
 #define PCM51XX_PROC_FLOW_1 0x01u
 #define PCM51XX_PROC_FLOW_2 0x02u
