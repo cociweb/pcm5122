@@ -13,7 +13,21 @@ static const char *const TAG = "pcm5122.number";
 
 void EqBandGain::setup() {
   ESP_LOGCONFIG(TAG, "Setting up EQ Band %d Gain Number", this->band_ + 1);
-  // Publish initial state (0 dB default)
+
+  // Restore saved gain from preferences (RTC memory)
+  this->pref_ = this->make_entity_preference<float>();
+  float restored_gain;
+  if (this->pref_.load(&restored_gain)) {
+    ESP_LOGD(TAG, "Band %d: restored gain = %.1f dB", this->band_ + 1, restored_gain);
+    // Apply the restored gain to hardware (calculate coefficients + write DSP RAM)
+    this->apply_gain_(restored_gain);
+    this->publish_state(restored_gain);
+    return;
+  }
+
+  // No saved preference — initialise with 0 dB and apply identity coefficients
+  ESP_LOGD(TAG, "Band %d: no saved gain, defaulting to 0 dB", this->band_ + 1);
+  this->apply_gain_(0.0f);
   this->publish_state(0.0f);
 }
 
@@ -150,10 +164,9 @@ int EqBandGain::calculate_coefficients_(double gain_db, BiquadCoeffs *c) const {
   return 0;
 }
 
-void EqBandGain::control(float value) {
+void EqBandGain::apply_gain_(float value) {
   double gain_db = (double)value;
 
-  // Calculate biquad coefficients
   BiquadCoeffs coeffs{};
   int ret = this->calculate_coefficients_(gain_db, &coeffs);
 
@@ -182,6 +195,14 @@ void EqBandGain::control(float value) {
     ESP_LOGW(TAG, "Band %d: coefficient calculation failed (gain=%.1fdB)",
              this->band_ + 1, gain_db);
   }
+}
+
+void EqBandGain::control(float value) {
+  // Apply the new gain to hardware
+  this->apply_gain_(value);
+
+  // Save to preferences so it is restored after reboot
+  this->pref_.save(&value);
 
   this->publish_state(value);
 }

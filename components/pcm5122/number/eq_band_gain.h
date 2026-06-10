@@ -33,7 +33,10 @@ struct BiquadCoeffs {
  * One per band — the only runtime-adjustable value for each band.
  * filter_type, frequency, q_factor, min_gain, max_gain are set from
  * YAML config during code generation.
- * On gain change, calculates biquad coefficients and logs them.
+ *
+ * Persists gain value across reboots using ESPHome preferences (RTC
+ * memory).  On setup, the saved gain is restored and the corresponding
+ * biquad coefficients are written to the PCM5122 DSP RAM.
  * ------------------------------------------------------------------ */
 class EqBandGain : public number::Number, public Component, public Parented<Pcm5122Component> {
  public:
@@ -51,7 +54,12 @@ class EqBandGain : public number::Number, public Component, public Parented<Pcm5
   uint16_t frequency_{1000};
   float q_factor_{1.0f};
 
+  ESPPreferenceObject pref_;
+
   void control(float value) override;
+
+  /* Apply the given gain to hardware: calculate coefficients + write to DSP. */
+  void apply_gain_(float value);
 
   /* Calculate biquad coefficients using Audio EQ Cookbook formulas. */
   int calculate_coefficients_(double gain_db, BiquadCoeffs *c) const;
