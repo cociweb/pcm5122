@@ -4,17 +4,27 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID,
     ENTITY_CATEGORY_CONFIG,
-    UNIT_DECIBEL,
-    DEVICE_CLASS_SIGNAL_STRENGTH,
+    UNIT_DECIBEL
 )
 
 from ..audio_dac import CONF_PCM5122_ID, Pcm5122Component, pcm5122_ns
 
 EqBandGain = pcm5122_ns.class_("EqBandGain", number.Number, cg.Component)
 
+# Filter type enum values matching EqBandFilterType in eq_band_gain.h
+EqBandFilterTypeEnum = pcm5122_ns.enum("EqBandFilterType", is_class=True)
+EQ_BAND_FILTER_TYPE = {
+    "Equalizer": EqBandFilterTypeEnum.BQ_FILTER_EQ_Q_FACTOR,
+    "Low Pass": EqBandFilterTypeEnum.BQ_FILTER_LOW_PASS,
+    "High Pass": EqBandFilterTypeEnum.BQ_FILTER_HIGH_PASS,
+    "High Shelf": EqBandFilterTypeEnum.BQ_FILTER_HIGH_SHELF,
+    "Low Shelf": EqBandFilterTypeEnum.BQ_FILTER_LOW_SHELF,
+}
+
 # Gain range limits (matching PCM51XX digital volume range)
 GAIN_MIN = -24
 GAIN_MAX = 24
+
 
 def _validate_band_config(config):
     """Validate band configuration after decibel conversion."""
@@ -44,7 +54,9 @@ def _band_schema():
     return cv.All(
         cv.Schema(
             {
-                cv.Optional("filter_type", default="Peaking EQ"): cv.string_strict,
+                cv.Optional("filter_type", default="Peaking EQ"): cv.enum(
+                    EQ_BAND_FILTER_TYPE, upper=False
+                ),
                 cv.Optional("frequency", default=1000): cv.All(
                     cv.int_, cv.int_range(1, 20000)
                 ),
@@ -87,9 +99,10 @@ async def to_code(config):
         if band_config is None:
             continue
 
-        # Static configuration values (validated by schema, converted from dB to int)
-        # filter_type = band_config["filter_type"]
-        # q_factor = band_config["q_factor"]
+        # Static configuration values (validated by schema)
+        filter_type = band_config["filter_type"]    # already validated as C++ enum
+        frequency = band_config["frequency"]
+        q_factor = band_config["q_factor"]
         min_gain = band_config["min_gain"]
         max_gain = band_config["max_gain"]
 
@@ -104,3 +117,6 @@ async def to_code(config):
             await cg.register_component(n, gain_config)
             await cg.register_parented(n, pcm5122_component)
             cg.add(n.set_band(band_num - 1))
+            cg.add(n.set_filter_type(filter_type))
+            cg.add(n.set_frequency(frequency))
+            cg.add(n.set_q_factor(q_factor))

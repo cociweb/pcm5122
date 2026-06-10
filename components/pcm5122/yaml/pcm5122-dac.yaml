@@ -38,7 +38,7 @@ select:
 number:
   - platform: pcm5122
     band_1:
-      filter_type: "Low Shelf"              # Filter type: one of "Low Shelf", "High Shelf", "Equalizer", "Low Pass", "High Pass", "Band Pass",
+      filter_type: "Low Shelf"              # Filter type: one of "Low Shelf", "High Shelf", "Equalizer", "Low Pass", "High Pass"
       frequency: 50                         # Filter center frequency in Hz
       q_factor: 1.5                         # Q-factor (if applicable to selected filter), 0.1 .. 10.0
       min_gain: -12dB                       # Minimum slider value, can go down to -24 dB 
