@@ -14,6 +14,9 @@ namespace esphome
 
     static const char* const MIXER_MODE_TEXT[] = {"STEREO", "STEREO_INVERSE", "RIGHT", "LEFT"};
     static const char* const CLOCK_MODE_TEXT[] = {"AUTO", "BCK"};
+    static const char* const AUTO_MUTE_TIME_TEXT[] = {"21ms", "106ms", "213ms", "533ms", "1.07s", "2.13s",
+                                                      "5.33s", "10.66s"};
+    static const char* const RAMP_STEP_TEXT[] = {"4dB", "2dB", "1dB", "0.5dB"};
 
     static const uint8_t UNMUTE_DELAY_MS = 50;
     static const uint8_t VOLUME_RAMP_DELAY_MS = 2;
@@ -70,6 +73,9 @@ namespace esphome
         return false;
 
       if (!this->configure_clock_())
+        return false;
+
+      if (!this->configure_dsp_())
         return false;
 
       if (!this->set_mixer_mode_(this->pcm5122_state_.mixer_mode))
@@ -156,6 +162,76 @@ namespace esphome
       return true;
     }
 
+    bool Pcm5122Component::configure_dsp_()
+    {
+      uint8_t dsp = 0;
+      if (!this->pcm5122_read_byte_(PCM5122_REG_DSP, &dsp))
+      {
+        ESP_LOGE(TAG, "%s read DSP", ERROR);
+        return false;
+      }
+
+      if (this->pcm5122_state_.dsp_de_emphasis)
+        dsp |= PCM5122_DSP_DEEMPHASIS;
+      else
+        dsp &= ~PCM5122_DSP_DEEMPHASIS;
+
+      if (!this->pcm5122_write_byte_(PCM5122_REG_DSP, dsp))
+      {
+        ESP_LOGE(TAG, "%s write DSP", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      uint8_t digital_mute_enable = this->pcm5122_state_.dsp_soft_mute ? PCM5122_DIGITAL_MUTE_ENABLE_STEREO : 0x00;
+      if (!this->pcm5122_write_byte_(PCM5122_REG_DIGITAL_MUTE_ENABLE, digital_mute_enable))
+      {
+        ESP_LOGE(TAG, "%s write digital mute enable", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      uint8_t auto_mute = (this->pcm5122_state_.dsp_auto_mute_time << 4) | this->pcm5122_state_.dsp_auto_mute_time;
+      if (!this->pcm5122_write_byte_(PCM5122_REG_AUTO_MUTE, auto_mute))
+      {
+        ESP_LOGE(TAG, "%s write auto mute", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      uint8_t digital_mute_1 = 0;
+      if (!this->pcm5122_read_byte_(PCM5122_REG_DIGITAL_MUTE_1, &digital_mute_1))
+      {
+        ESP_LOGE(TAG, "%s read digital mute ramp", ERROR);
+        return false;
+      }
+      digital_mute_1 &= ~PCM5122_VOLUME_RAMP_STEP_MASK;
+      digital_mute_1 |= (this->pcm5122_state_.dsp_ramp_step << 4) | this->pcm5122_state_.dsp_ramp_step;
+      if (!this->pcm5122_write_byte_(PCM5122_REG_DIGITAL_MUTE_1, digital_mute_1))
+      {
+        ESP_LOGE(TAG, "%s write digital mute ramp", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      uint8_t digital_mute_2 = 0;
+      if (!this->pcm5122_read_byte_(PCM5122_REG_DIGITAL_MUTE_2, &digital_mute_2))
+      {
+        ESP_LOGE(TAG, "%s read emergency mute ramp", ERROR);
+        return false;
+      }
+      digital_mute_2 &= ~PCM5122_EMERGENCY_RAMP_STEP_MASK;
+      digital_mute_2 |= (this->pcm5122_state_.dsp_ramp_step << 4);
+      if (!this->pcm5122_write_byte_(PCM5122_REG_DIGITAL_MUTE_2, digital_mute_2))
+      {
+        ESP_LOGE(TAG, "%s write emergency mute ramp", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      return true;
+    }
+
     void Pcm5122Component::dump_config()
     {
       ESP_LOGCONFIG(TAG, "PCM5122 Audio Dac:");
@@ -175,7 +251,11 @@ namespace esphome
                       "  Minimum Volume: %idB\n"
                       "  Mixer Mode: %s\n"
                       "  Clock Mode: %s\n"
-                      "  Bits per Sample: %u\n",
+                      "  Bits per Sample: %u\n"
+                      "  DSP De-emphasis: %s\n"
+                      "  DSP Soft Mute: %s\n"
+                      "  DSP Auto Mute Time: %s\n"
+                      "  DSP Ramp Step: %s\n",
   
                       this->number_registers_configured_,
                       this->pcm5122_state_.analog_gain,
@@ -183,7 +263,11 @@ namespace esphome
                       this->pcm5122_state_.volume_min,
                       MIXER_MODE_TEXT[this->pcm5122_state_.mixer_mode],
                       CLOCK_MODE_TEXT[this->pcm5122_state_.clock_mode],
-                      this->pcm5122_state_.bits_per_sample
+                      this->pcm5122_state_.bits_per_sample,
+                      YESNO(this->pcm5122_state_.dsp_de_emphasis),
+                      YESNO(this->pcm5122_state_.dsp_soft_mute),
+                      AUTO_MUTE_TIME_TEXT[this->pcm5122_state_.dsp_auto_mute_time],
+                      RAMP_STEP_TEXT[this->pcm5122_state_.dsp_ramp_step]
         );
         break;
       }

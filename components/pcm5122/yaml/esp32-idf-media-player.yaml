@@ -68,6 +68,11 @@ audio_dac:
     mixer_mode: STEREO      # MIXER MODE: STEREO, STEREO_INVERSE, LEFT, RIGHT
     clock_mode: AUTO
     bits_per_sample: 16bit
+    dsp:
+      soft_mute: true
+      de_emphasis: false
+      auto_mute_time: 21ms
+      ramp_step: 1dB
 
 i2s_audio:
   i2s_lrclk_pin: GPIO25
