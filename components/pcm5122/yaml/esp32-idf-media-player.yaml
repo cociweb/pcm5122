@@ -69,6 +69,7 @@ audio_dac:
     clock_mode: AUTO
     bits_per_sample: 16bit
     dsp:
+      preset: flat
       soft_mute: true
       de_emphasis: false
       auto_mute_time: 21ms

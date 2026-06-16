@@ -39,6 +39,13 @@ namespace esphome
       void config_bits_per_sample(Pcm5122BitsPerSample bits_per_sample) {
         this->pcm5122_state_.bits_per_sample = bits_per_sample;
       }
+      void config_dsp_de_emphasis(bool de_emphasis) { this->pcm5122_state_.dsp_de_emphasis = de_emphasis; }
+      void config_dsp_soft_mute(bool soft_mute) { this->pcm5122_state_.dsp_soft_mute = soft_mute; }
+      void config_dsp_auto_mute_time(Pcm5122AutoMuteTime auto_mute_time) {
+        this->pcm5122_state_.dsp_auto_mute_time = auto_mute_time;
+      }
+      void config_dsp_ramp_step(Pcm5122RampStep ramp_step) { this->pcm5122_state_.dsp_ramp_step = ramp_step; }
+      void config_dsp_preset(Pcm5122DspPreset preset) { this->pcm5122_state_.dsp_preset = preset; }
 
     protected:
       GPIOPin *enable_pin_{nullptr};
@@ -46,6 +53,7 @@ namespace esphome
       bool configure_registers_();
       bool configure_clock_();
       bool configure_audio_format_();
+      bool configure_dsp_();
       bool ramp_digital_volume_(uint8_t new_volume);
 
       bool get_analog_gain_(int8_t *gain_db);
@@ -85,6 +93,11 @@ namespace esphome
         MixerMode mixer_mode;     // configured by YAML
         Pcm5122ClockMode clock_mode = CLOCK_MODE_AUTO;
         Pcm5122BitsPerSample bits_per_sample = PCM5122_BITS_PER_SAMPLE_16;
+        bool dsp_de_emphasis = false;
+        bool dsp_soft_mute = true;
+        Pcm5122AutoMuteTime dsp_auto_mute_time = AUTO_MUTE_21MS;
+        Pcm5122RampStep dsp_ramp_step = RAMP_STEP_1DB;
+        Pcm5122DspPreset dsp_preset = DSP_PRESET_DEFAULT;
         uint8_t raw_volume_max;     // initialised in setup
         uint8_t raw_volume_min;     // initialised in setup
 

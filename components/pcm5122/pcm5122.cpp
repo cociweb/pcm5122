@@ -22,6 +22,24 @@ namespace esphome
     static const uint8_t VOLUME_RAMP_DELAY_MS = 2;
     static const uint8_t VOLUME_RAMP_STEP = 2;
 
+    const char *dsp_preset_to_string(Pcm5122DspPreset preset)
+    {
+      switch (preset)
+      {
+      case DSP_PRESET_FIR_DEEMPHASIS:
+        return "FIR_DEEMPHASIS";
+      case DSP_PRESET_LOW_LATENCY_IIR:
+        return "LOW_LATENCY";
+      case DSP_PRESET_HIGH_ATTENUATION:
+        return "HIGH_ATTENUATION";
+      case DSP_PRESET_RINGINGLESS_LOW_LATENCY_FIR:
+        return "RINGINGLESS_LOW_LATENCY";
+      case DSP_PRESET_DEFAULT:
+      default:
+        return "FLAT";
+      }
+    }
+
     void Pcm5122Component::setup()
     {
       ESP_LOGCONFIG(TAG, "Running setup");
@@ -183,6 +201,13 @@ namespace esphome
       }
       this->number_registers_configured_++;
 
+      if (!this->pcm5122_write_byte_(PCM5122_REG_DSP_PROGRAM, this->pcm5122_state_.dsp_preset))
+      {
+        ESP_LOGE(TAG, "%s write DSP program", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
       uint8_t digital_mute_enable = this->pcm5122_state_.dsp_soft_mute ? PCM5122_DIGITAL_MUTE_ENABLE_STEREO : 0x00;
       if (!this->pcm5122_write_byte_(PCM5122_REG_DIGITAL_MUTE_ENABLE, digital_mute_enable))
       {
@@ -254,6 +279,7 @@ namespace esphome
                       "  Bits per Sample: %u\n"
                       "  DSP De-emphasis: %s\n"
                       "  DSP Soft Mute: %s\n"
+                      "  DSP Preset: %s\n"
                       "  DSP Auto Mute Time: %s\n"
                       "  DSP Ramp Step: %s\n",
   
@@ -266,6 +292,7 @@ namespace esphome
                       this->pcm5122_state_.bits_per_sample,
                       YESNO(this->pcm5122_state_.dsp_de_emphasis),
                       YESNO(this->pcm5122_state_.dsp_soft_mute),
+                      dsp_preset_to_string(this->pcm5122_state_.dsp_preset),
                       AUTO_MUTE_TIME_TEXT[this->pcm5122_state_.dsp_auto_mute_time],
                       RAMP_STEP_TEXT[this->pcm5122_state_.dsp_ramp_step]
         );

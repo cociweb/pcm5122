@@ -77,6 +77,7 @@ audio_dac:
     clock_mode: AUTO        # AUTO uses PCM5122 divider autoset; BCK forces BCK as PLL reference
     bits_per_sample: 16bit  # match ESP-IDF i2s_audio default unless configured otherwise
     dsp:
+      preset: flat
       soft_mute: true
       de_emphasis: false
       auto_mute_time: 21ms

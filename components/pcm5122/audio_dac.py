@@ -24,6 +24,7 @@ CONF_DE_EMPHASIS = "de_emphasis"
 CONF_SOFT_MUTE = "soft_mute"
 CONF_AUTO_MUTE_TIME = "auto_mute_time"
 CONF_RAMP_STEP = "ramp_step"
+CONF_PRESET = "preset"
 
 pcm5122_ns = cg.esphome_ns.namespace("pcm5122")
 Pcm5122Component = pcm5122_ns.class_("Pcm5122Component", AudioDac, cg.Component, i2c.I2CDevice)
@@ -69,6 +70,15 @@ RAMP_STEPS = {
     "0.5dB": Pcm5122RampStep.RAMP_STEP_0_5DB,
 }
 
+Pcm5122DspPreset = pcm5122_ns.enum("Pcm5122DspPreset")
+DSP_PRESETS = {
+    "FLAT": Pcm5122DspPreset.DSP_PRESET_DEFAULT,
+    "FIR_DEEMPHASIS": Pcm5122DspPreset.DSP_PRESET_FIR_DEEMPHASIS,
+    "LOW_LATENCY": Pcm5122DspPreset.DSP_PRESET_LOW_LATENCY_IIR,
+    "HIGH_ATTENUATION": Pcm5122DspPreset.DSP_PRESET_HIGH_ATTENUATION,
+    "RINGINGLESS_LOW_LATENCY": Pcm5122DspPreset.DSP_PRESET_RINGINGLESS_LOW_LATENCY_FIR,
+}
+
 ANALOG_GAINS = [-6,  0]
 _validate_bits = cv.float_with_unit("bits", "bit")
 
@@ -98,6 +108,9 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_DSP, default={}): cv.Schema(
                 {
+                    cv.Optional(CONF_PRESET, default="FLAT"): cv.enum(
+                        DSP_PRESETS, upper=True
+                    ),
                     cv.Optional(CONF_DE_EMPHASIS, default=False): cv.boolean,
                     cv.Optional(CONF_SOFT_MUTE, default=True): cv.boolean,
                     cv.Optional(CONF_AUTO_MUTE_TIME, default="21ms"): cv.enum(
@@ -139,5 +152,6 @@ async def to_code(config):
     cg.add(var.config_dsp_soft_mute(config[CONF_DSP][CONF_SOFT_MUTE]))
     cg.add(var.config_dsp_auto_mute_time(config[CONF_DSP][CONF_AUTO_MUTE_TIME]))
     cg.add(var.config_dsp_ramp_step(config[CONF_DSP][CONF_RAMP_STEP]))
+    cg.add(var.config_dsp_preset(config[CONF_DSP][CONF_PRESET]))
     cg.add(var.config_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.config_volume_min(config[CONF_VOLUME_MIN]))
