@@ -82,63 +82,63 @@ DSP_PRESETS = {
 
 SOUND_PRESETS = {
     "FLAT": {
-        CONF_ANALOG_GAIN: 0,
-        CONF_VOLUME_MAX: -3,
-        CONF_VOLUME_MIN: -103,
+        CONF_ANALOG_GAIN: "0dB",
+        CONF_VOLUME_MAX: "-3dB",
+        CONF_VOLUME_MIN: "-103dB",
         CONF_DSP: {
-            CONF_PRESET: DSP_PRESETS["FLAT"],
+            CONF_PRESET: "FLAT",
             CONF_SOFT_MUTE: True,
             CONF_DE_EMPHASIS: False,
-            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["21ms"],
-            CONF_RAMP_STEP: RAMP_STEPS["1dB"],
+            CONF_AUTO_MUTE_TIME: "21ms",
+            CONF_RAMP_STEP: "1dB",
         },
     },
     "HIFI": {
-        CONF_ANALOG_GAIN: -6,
-        CONF_VOLUME_MAX: -3,
-        CONF_VOLUME_MIN: -80,
+        CONF_ANALOG_GAIN: "-6dB",
+        CONF_VOLUME_MAX: "-3dB",
+        CONF_VOLUME_MIN: "-80dB",
         CONF_DSP: {
-            CONF_PRESET: DSP_PRESETS["HIGH_ATTENUATION"],
+            CONF_PRESET: "HIGH_ATTENUATION",
             CONF_SOFT_MUTE: True,
             CONF_DE_EMPHASIS: False,
-            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["106ms"],
-            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+            CONF_AUTO_MUTE_TIME: "106ms",
+            CONF_RAMP_STEP: "0.5dB",
         },
     },
     "SPEECH": {
-        CONF_ANALOG_GAIN: -6,
-        CONF_VOLUME_MAX: -6,
-        CONF_VOLUME_MIN: -60,
+        CONF_ANALOG_GAIN: "-6dB",
+        CONF_VOLUME_MAX: "-6dB",
+        CONF_VOLUME_MIN: "-60dB",
         CONF_DSP: {
-            CONF_PRESET: DSP_PRESETS["LOW_LATENCY"],
+            CONF_PRESET: "LOW_LATENCY",
             CONF_SOFT_MUTE: True,
             CONF_DE_EMPHASIS: False,
-            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["21ms"],
-            CONF_RAMP_STEP: RAMP_STEPS["1dB"],
+            CONF_AUTO_MUTE_TIME: "21ms",
+            CONF_RAMP_STEP: "1dB",
         },
     },
     "SMALL_SPEAKER": {
-        CONF_ANALOG_GAIN: -6,
-        CONF_VOLUME_MAX: -9,
-        CONF_VOLUME_MIN: -70,
+        CONF_ANALOG_GAIN: "-6dB",
+        CONF_VOLUME_MAX: "-9dB",
+        CONF_VOLUME_MIN: "-70dB",
         CONF_DSP: {
-            CONF_PRESET: DSP_PRESETS["RINGINGLESS_LOW_LATENCY"],
+            CONF_PRESET: "RINGINGLESS_LOW_LATENCY",
             CONF_SOFT_MUTE: True,
             CONF_DE_EMPHASIS: False,
-            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["106ms"],
-            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+            CONF_AUTO_MUTE_TIME: "106ms",
+            CONF_RAMP_STEP: "0.5dB",
         },
     },
     "NIGHT": {
-        CONF_ANALOG_GAIN: -6,
-        CONF_VOLUME_MAX: -12,
-        CONF_VOLUME_MIN: -70,
+        CONF_ANALOG_GAIN: "-6dB",
+        CONF_VOLUME_MAX: "-12dB",
+        CONF_VOLUME_MIN: "-70dB",
         CONF_DSP: {
-            CONF_PRESET: DSP_PRESETS["RINGINGLESS_LOW_LATENCY"],
+            CONF_PRESET: "RINGINGLESS_LOW_LATENCY",
             CONF_SOFT_MUTE: True,
             CONF_DE_EMPHASIS: False,
-            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["213ms"],
-            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+            CONF_AUTO_MUTE_TIME: "213ms",
+            CONF_RAMP_STEP: "0.5dB",
         },
     },
 }
@@ -147,7 +147,8 @@ ANALOG_GAINS = [-6,  0]
 _validate_bits = cv.float_with_unit("bits", "bit")
 
 def apply_sound_preset(config):
-    preset = config[CONF_SOUND_PRESET]
+    preset = config.get(CONF_SOUND_PRESET, "FLAT")
+    preset = preset.upper()
     preset_config = SOUND_PRESETS[preset]
     for key in (CONF_ANALOG_GAIN, CONF_VOLUME_MAX, CONF_VOLUME_MIN):
         if key not in config:
@@ -166,6 +167,7 @@ def validate_config(config):
     return config
 
 CONFIG_SCHEMA = cv.All(
+    apply_sound_preset,
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(Pcm5122Component),
@@ -210,7 +212,6 @@ CONFIG_SCHEMA = cv.All(
     )
     .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x4D))
-    .add_extra(apply_sound_preset)
     .add_extra(validate_config),
     cv.only_on_esp32,
 )
