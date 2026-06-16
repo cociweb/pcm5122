@@ -173,23 +173,35 @@ Match this to the I2S output configuration. `16bit` is the safest default for ES
 
 #### I2S `sample_rate`
 
-Use `48000` as the recommended default sample rate for ESP32/ESP-IDF audio output:
+Use `44100` as the recommended sample rate when the goal is crackle-free playback of 44.1 kHz music sources:
 
 ```yaml
 speaker:
   - platform: i2s_audio
-    sample_rate: 48000
+    sample_rate: 44100
+    use_apll: true
 ```
 
-The PCM5122 supports 44.1 kHz audio, but `44100` is more sensitive to the ESP32 I2S clock source, divider accuracy and the complete audio pipeline. It may work on some boards, but `48000` is the safer choice when the goal is crackle-free playback.
+For 44.1 kHz playback, also configure the PCM5122 to use BCK as PLL reference:
 
-Use `44100` only when all of the following are true:
+```yaml
+audio_dac:
+  - platform: pcm5122
+    clock_mode: BCK
+```
 
-- The source material is natively 44.1 kHz and you want to avoid resampling.
-- The ESP32 board has stable I2S clocking in your configuration.
-- The output has been tested with the selected `clock_mode`, `bits_per_sample` and speaker/resampler chain.
+The PCM5122 supports both 44.1 kHz and 48 kHz audio. On ESP32/ESP-IDF, `44100` needs more careful clocking than `48000`. `use_apll: true` gives the ESP32 I2S peripheral a more suitable audio clock source for 44.1 kHz families, and `clock_mode: BCK` makes the DAC derive its PLL reference from the actual I2S bit clock.
 
-If crackling appears at `44100`, switch back to `48000` and keep `clock_mode: AUTO` first. If the board has no MCLK and clock detection is unstable, also test `clock_mode: BCK`.
+For the most stable 44.1 kHz setup:
+
+- Use `sample_rate: 44100` on the I2S speaker.
+- Use `use_apll: true` on the I2S speaker.
+- Use `clock_mode: BCK` on the PCM5122.
+- Keep `bits_per_sample: 16bit` unless the whole pipeline is configured for 24/32-bit.
+- Keep the resampler output at `44100` if a resampler is used.
+- Avoid mixing sources with different sample rates unless they are resampled to `44100`.
+
+Use `48000` only if your source material or another part of the audio pipeline is fixed to 48 kHz.
 
 #### `volume_max` and `volume_min`
 
@@ -399,7 +411,7 @@ Can be found in the example for [ESP32](/components/pcm5122/yaml/esp32-idf-media
    - Ensure I2S audio pins are correctly configured
    - Check I2S clock and data line connections
    - Ensure `bits_per_sample` matches the I2S output format
-   - Prefer `sample_rate: 48000` for ESP32/ESP-IDF playback
+   - Prefer `sample_rate: 44100` with `use_apll: true` for 44.1 kHz music playback
 
 3. **Volume Level**
    - Confirm volume is not set to 0%
@@ -435,16 +447,17 @@ Can be found in the example for [ESP32](/components/pcm5122/yaml/esp32-idf-media
      auto_mute_time: 106ms
    ```
 
-5. **Try BCK Clock Reference**
+5. **Use BCK Clock Reference for 44.1 kHz**
    ```yaml
    clock_mode: BCK
    ```
 
-6. **Avoid 44.1 kHz Until Stable**
+6. **Use APLL for 44.1 kHz**
    ```yaml
    speaker:
      - platform: i2s_audio
-       sample_rate: 48000
+       sample_rate: 44100
+       use_apll: true
    ```
 
 ### I2C Communication Errors

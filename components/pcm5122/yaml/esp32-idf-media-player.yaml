@@ -64,7 +64,7 @@ audio_dac:
     enable_pin: GPIO13      # optional, to enable/disable the DAC (XSMT pin)
     sound_preset: hifi
     mixer_mode: STEREO      # MIXER MODE: STEREO, STEREO_INVERSE, LEFT, RIGHT
-    clock_mode: AUTO
+    clock_mode: BCK
     bits_per_sample: 16bit
 
 i2s_audio:
@@ -78,7 +78,9 @@ speaker:
     i2s_dout_pin: GPIO22
     audio_dac: pcm5122_dac
     channel: stereo
-    sample_rate: 48000
+    sample_rate: 44100
+    use_apll: true
+    mclk_multiple: 256
     timeout: never
 
   - platform: mixer
