@@ -25,6 +25,7 @@ CONF_SOFT_MUTE = "soft_mute"
 CONF_AUTO_MUTE_TIME = "auto_mute_time"
 CONF_RAMP_STEP = "ramp_step"
 CONF_PRESET = "preset"
+CONF_SOUND_PRESET = "sound_preset"
 
 pcm5122_ns = cg.esphome_ns.namespace("pcm5122")
 Pcm5122Component = pcm5122_ns.class_("Pcm5122Component", AudioDac, cg.Component, i2c.I2CDevice)
@@ -79,8 +80,83 @@ DSP_PRESETS = {
     "RINGINGLESS_LOW_LATENCY": Pcm5122DspPreset.DSP_PRESET_RINGINGLESS_LOW_LATENCY_FIR,
 }
 
+SOUND_PRESETS = {
+    "FLAT": {
+        CONF_ANALOG_GAIN: 0,
+        CONF_VOLUME_MAX: -3,
+        CONF_VOLUME_MIN: -103,
+        CONF_DSP: {
+            CONF_PRESET: DSP_PRESETS["FLAT"],
+            CONF_SOFT_MUTE: True,
+            CONF_DE_EMPHASIS: False,
+            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["21ms"],
+            CONF_RAMP_STEP: RAMP_STEPS["1dB"],
+        },
+    },
+    "HIFI": {
+        CONF_ANALOG_GAIN: -6,
+        CONF_VOLUME_MAX: -3,
+        CONF_VOLUME_MIN: -80,
+        CONF_DSP: {
+            CONF_PRESET: DSP_PRESETS["HIGH_ATTENUATION"],
+            CONF_SOFT_MUTE: True,
+            CONF_DE_EMPHASIS: False,
+            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["106ms"],
+            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+        },
+    },
+    "SPEECH": {
+        CONF_ANALOG_GAIN: -6,
+        CONF_VOLUME_MAX: -6,
+        CONF_VOLUME_MIN: -60,
+        CONF_DSP: {
+            CONF_PRESET: DSP_PRESETS["LOW_LATENCY"],
+            CONF_SOFT_MUTE: True,
+            CONF_DE_EMPHASIS: False,
+            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["21ms"],
+            CONF_RAMP_STEP: RAMP_STEPS["1dB"],
+        },
+    },
+    "SMALL_SPEAKER": {
+        CONF_ANALOG_GAIN: -6,
+        CONF_VOLUME_MAX: -9,
+        CONF_VOLUME_MIN: -70,
+        CONF_DSP: {
+            CONF_PRESET: DSP_PRESETS["RINGINGLESS_LOW_LATENCY"],
+            CONF_SOFT_MUTE: True,
+            CONF_DE_EMPHASIS: False,
+            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["106ms"],
+            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+        },
+    },
+    "NIGHT": {
+        CONF_ANALOG_GAIN: -6,
+        CONF_VOLUME_MAX: -12,
+        CONF_VOLUME_MIN: -70,
+        CONF_DSP: {
+            CONF_PRESET: DSP_PRESETS["RINGINGLESS_LOW_LATENCY"],
+            CONF_SOFT_MUTE: True,
+            CONF_DE_EMPHASIS: False,
+            CONF_AUTO_MUTE_TIME: AUTO_MUTE_TIMES["213ms"],
+            CONF_RAMP_STEP: RAMP_STEPS["0.5dB"],
+        },
+    },
+}
+
 ANALOG_GAINS = [-6,  0]
 _validate_bits = cv.float_with_unit("bits", "bit")
+
+def apply_sound_preset(config):
+    preset = config[CONF_SOUND_PRESET]
+    preset_config = SOUND_PRESETS[preset]
+    for key in (CONF_ANALOG_GAIN, CONF_VOLUME_MAX, CONF_VOLUME_MIN):
+        if key not in config:
+            config[key] = preset_config[key]
+
+    dsp_config = dict(preset_config[CONF_DSP])
+    dsp_config.update(config.get(CONF_DSP, {}))
+    config[CONF_DSP] = dsp_config
+    return config
 
 def validate_config(config):
     if config[CONF_ANALOG_GAIN] not in ANALOG_GAINS:
@@ -94,7 +170,10 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Pcm5122Component),
             cv.Optional(CONF_ENABLE_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_ANALOG_GAIN, default="0dB"): cv.All(
+            cv.Optional(CONF_SOUND_PRESET, default="FLAT"): cv.enum(
+                        SOUND_PRESETS, upper=True
+            ),
+            cv.Optional(CONF_ANALOG_GAIN): cv.All(
                         cv.decibel, cv.one_of(*ANALOG_GAINS)
             ),
             cv.Optional(CONF_MIXER_MODE, default="STEREO"): cv.enum(
@@ -108,29 +187,30 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_DSP, default={}): cv.Schema(
                 {
-                    cv.Optional(CONF_PRESET, default="FLAT"): cv.enum(
+                    cv.Optional(CONF_PRESET): cv.enum(
                         DSP_PRESETS, upper=True
                     ),
-                    cv.Optional(CONF_DE_EMPHASIS, default=False): cv.boolean,
-                    cv.Optional(CONF_SOFT_MUTE, default=True): cv.boolean,
-                    cv.Optional(CONF_AUTO_MUTE_TIME, default="21ms"): cv.enum(
+                    cv.Optional(CONF_DE_EMPHASIS): cv.boolean,
+                    cv.Optional(CONF_SOFT_MUTE): cv.boolean,
+                    cv.Optional(CONF_AUTO_MUTE_TIME): cv.enum(
                         AUTO_MUTE_TIMES
                     ),
-                    cv.Optional(CONF_RAMP_STEP, default="1dB"): cv.enum(
+                    cv.Optional(CONF_RAMP_STEP): cv.enum(
                         RAMP_STEPS
                     ),
                 }
             ),
-            cv.Optional(CONF_VOLUME_MAX, default="-3dB"): cv.All(
+            cv.Optional(CONF_VOLUME_MAX): cv.All(
                         cv.decibel, cv.int_range(-103, 24)
             ),
-            cv.Optional(CONF_VOLUME_MIN, default="-103dB"): cv.All(
+            cv.Optional(CONF_VOLUME_MIN): cv.All(
                         cv.decibel, cv.int_range(-103, 24)
             ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x4D))
+    .add_extra(apply_sound_preset)
     .add_extra(validate_config),
     cv.only_on_esp32,
 )

@@ -62,18 +62,10 @@ audio_dac:
   - platform: pcm5122
     id: pcm5122_dac
     enable_pin: GPIO13      # optional, to enable/disable the DAC (XSMT pin)
-    volume_max: 0dB         # maximum volume range 0dB, can go up to +24dB
-    volume_min: -60dB       # minimum volume range -60dB, can go down to -103dB
-    analog_gain: -6dB       # or -6Db for 1V RMS output, default is 0dB = 2V RMS output
+    sound_preset: hifi
     mixer_mode: STEREO      # MIXER MODE: STEREO, STEREO_INVERSE, LEFT, RIGHT
     clock_mode: AUTO
     bits_per_sample: 16bit
-    dsp:
-      preset: flat
-      soft_mute: true
-      de_emphasis: false
-      auto_mute_time: 21ms
-      ramp_step: 1dB
 
 i2s_audio:
   i2s_lrclk_pin: GPIO25

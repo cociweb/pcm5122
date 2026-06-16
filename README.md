@@ -19,7 +19,7 @@ external_components:
 
 ## Overview
 
-The PCM5122 is a versatile audio DAC that communicates with the ESP32 via I2C interface (control) and I2S (audio). This component allows basic control of the DAC's features including digital volume adjustment, mute control, analog gain, basic mixer controls and power management through Home Assistant or direct ESPHome automation. A
+The PCM5122 is a versatile audio DAC that communicates with the ESP32 via I2C interface (control) and I2S (audio). This component allows control of the DAC's features including digital volume adjustment, mute control, analog gain, mixer controls, DSP presets, mute/ramp tuning, clock configuration and power management through Home Assistant or direct ESPHome automation.
 
 ### Key Specifications
 
@@ -28,6 +28,10 @@ The PCM5122 is a versatile audio DAC that communicates with the ESP32 via I2C in
 - **Volume Control**: 0-100% via ESPHome (internally remapped to dB range)
 - **Analog Gain**: Configurable (-6 dB or 0 dB) for 1V or 2V RMS output levels
 - **Mute Control**: Register-based (always available) and optional GPIO-based mute
+- **Clocking**: Automatic clock configuration or BCK as PLL reference
+- **Audio Format**: I2S format with configurable sample width
+- **DSP Controls**: DSP program preset, de-emphasis, auto-mute time and internal volume ramp step
+- **Sound Presets**: High-level presets for common use cases
 - **Default I2C Address**: 0x4D (7-bit)
 - **Power Modes**: Play mode (active audio) and Sleep mode (low power)
 
@@ -43,6 +47,9 @@ The PCM5122 ESPHome component provides the following capabilities:
 - **Power Management** - Enable Deep Sleep mode for low-power operation
 - **Volume Range Configuration** - Define maximum and minimum volume limits in dB
 - **Basic Mixer control** - Stereo (default), Stereo (inverted channels), Left or Right channel only 
+- **Clock and I2S Format Configuration** - Select clock handling and bits per sample
+- **Soft Mute and Volume Ramping** - Reduce pops and clicks during stream start/stop and volume changes
+- **DSP and Sound Presets** - Configure PCM5122 DSP program and high-level audio profiles
 
 ## Hardware Requirements
 
@@ -81,8 +88,10 @@ audio_dac:
   - platform: pcm5122
     i2c_id: i2c_bus
     enable_pin: GPIO13
-    volume_max: 0
-    volume_min: -103
+    sound_preset: hifi
+    mixer_mode: STEREO
+    clock_mode: AUTO
+    bits_per_sample: 16bit
 ```
 
 ### Configuration Variables
@@ -93,11 +102,146 @@ audio_dac:
 - **i2c_id** (*Optional*): ID of the I2C bus. Leave unset if only one I2C bus is defined.
 - **address** (*Optional*): I2C address of the DAC. Defaults to `0x4D` (7-bit address).
 - **enable_pin** (*Optional*): GPIO pin used to control DAC mute pin (if connected to XSMT pin).
-- **analog_gain** (*Optional*): Analog gain in dB. Valid values: `0dB` (default) or `-6dB`.
+- **sound_preset** (*Optional*): High-level preset. Defaults to `flat`.
+- **analog_gain** (*Optional*): Analog gain in dB. Valid values: `0dB` or `-6dB`. If omitted, it is selected by `sound_preset`.
   - `0dB`: Use for 2V RMS output signal
   - `-6dB`: Use for 1V RMS output signal
-- **volume_max** (*Optional*): Maximum volume level in dB. Valid range: -103 to 24. Default: `0` dB, to guarantee no clipping
-- **volume_min** (*Optional*): Minimum volume level in dB. Valid range: -103 to 24. Default: `-103` dB, but maybe raised to limit dynamic range. Reasonable value is -60dB.
+- **volume_max** (*Optional*): Maximum volume level in dB. Valid range: `-103dB` to `24dB`. If omitted, it is selected by `sound_preset`. The conservative default from `flat` is `-3dB`.
+- **volume_min** (*Optional*): Minimum volume level in dB. Valid range: `-103dB` to `24dB`. If omitted, it is selected by `sound_preset`.
+- **mixer_mode** (*Optional*): Channel routing mode. Defaults to `STEREO`.
+- **clock_mode** (*Optional*): PCM5122 clock configuration. Defaults to `AUTO`.
+- **bits_per_sample** (*Optional*): I2S audio word length. Defaults to `16bit`.
+- **dsp** (*Optional*): Low-level DSP configuration block. Values set here override the selected `sound_preset`.
+
+### Allowed Values
+
+#### `sound_preset`
+
+High-level presets configure `analog_gain`, `volume_max`, `volume_min` and the `dsp` block unless those options are explicitly set.
+
+- `flat`: Neutral default profile. Uses the PCM5122 default DSP program and conservative `volume_max: -3dB`.
+- `hifi`: General music profile with `analog_gain: -6dB`, `volume_max: -3dB`, high attenuation DSP program, slower mute timing and `0.5dB` ramp steps.
+- `speech`: Voice/TTS profile with lower maximum level and low-latency DSP program.
+- `small_speaker`: Safer profile for small speakers with lower output level and ringing-less low latency DSP program.
+- `night`: Quiet profile with lower maximum volume and slower mute/ramp behavior.
+
+Preset defaults:
+
+| `sound_preset` | `analog_gain` | `volume_max` | `volume_min` | `dsp.preset` | `dsp.auto_mute_time` | `dsp.ramp_step` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `flat` | `0dB` | `-3dB` | `-103dB` | `flat` | `21ms` | `1dB` |
+| `hifi` | `-6dB` | `-3dB` | `-80dB` | `high_attenuation` | `106ms` | `0.5dB` |
+| `speech` | `-6dB` | `-6dB` | `-60dB` | `low_latency` | `21ms` | `1dB` |
+| `small_speaker` | `-6dB` | `-9dB` | `-70dB` | `ringingless_low_latency` | `106ms` | `0.5dB` |
+| `night` | `-6dB` | `-12dB` | `-70dB` | `ringingless_low_latency` | `213ms` | `0.5dB` |
+
+Explicit YAML values override preset defaults:
+
+```yaml
+audio_dac:
+  - platform: pcm5122
+    sound_preset: hifi
+    volume_max: -6dB
+    dsp:
+      ramp_step: 1dB
+```
+
+#### `analog_gain`
+
+- `0dB`: 2V RMS output.
+- `-6dB`: 1V RMS output.
+
+#### `mixer_mode`
+
+- `STEREO`: Left input to left output, right input to right output.
+- `STEREO_INVERSE`: Swapped/inverted stereo routing.
+- `LEFT`: Left channel routed to both outputs.
+- `RIGHT`: Right channel routed to both outputs.
+
+#### `clock_mode`
+
+- `AUTO`: Use PCM5122 automatic clock divider configuration.
+- `BCK`: Force BCK as the PLL reference source. This is useful when no MCLK is supplied and automatic detection is unstable.
+
+#### `bits_per_sample`
+
+- `16bit`
+- `24bit`
+- `32bit`
+
+Match this to the I2S output configuration. `16bit` is the safest default for ESP-IDF based ESPHome audio.
+
+#### `volume_max` and `volume_min`
+
+- Valid range: `-103dB` to `24dB`
+- `volume_max` must be at least `9dB` greater than `volume_min`
+- Avoid positive `volume_max` values unless the whole signal path has enough headroom
+
+### DSP Configuration
+
+The `dsp` block exposes PCM5122 internal DSP and ramp controls.
+
+```yaml
+audio_dac:
+  - platform: pcm5122
+    sound_preset: hifi
+    dsp:
+      preset: high_attenuation
+      soft_mute: true
+      de_emphasis: false
+      auto_mute_time: 106ms
+      ramp_step: 0.5dB
+```
+
+#### `dsp.preset`
+
+Selects the PCM5122 DSP program.
+
+- `flat`: Default PCM5122 DSP program.
+- `fir_deemphasis`: FIR interpolation with de-emphasis.
+- `low_latency`: Low-latency IIR program.
+- `high_attenuation`: High attenuation filter program.
+- `ringingless_low_latency`: Ringing-less low latency FIR program.
+
+#### `dsp.soft_mute`
+
+- `true`: Enable PCM5122 digital auto-mute control for both channels.
+- `false`: Disable the digital auto-mute enable bits.
+
+Default is selected by `sound_preset`; all built-in presets enable it.
+
+#### `dsp.de_emphasis`
+
+- `true`: Enable PCM5122 de-emphasis.
+- `false`: Disable de-emphasis.
+
+Leave this `false` for normal modern audio streams. Use `true` only when playing material that requires de-emphasis.
+
+#### `dsp.auto_mute_time`
+
+Controls the PCM5122 zero-detect auto-mute timing.
+
+- `21ms`
+- `106ms`
+- `213ms`
+- `533ms`
+- `1.07s`
+- `2.13s`
+- `5.33s`
+- `10.66s`
+
+Longer values can reduce start/stop pops, but delay auto-mute behavior.
+
+#### `dsp.ramp_step`
+
+Controls the PCM5122 internal volume ramp step for normal and emergency ramps.
+
+- `4dB`
+- `2dB`
+- `1dB`
+- `0.5dB`
+
+Smaller steps are smoother but take longer.
 
 ## Switches
 
@@ -105,7 +249,7 @@ An optional switch can be configured to control the DAC enable/disable state in 
 
 ## Volume Control
 
-Volume is controlled as a percentage (0-100%) which is internally remapped to the DAC's digital volume register range (-103 dB to 0 dB, unless remaped in yaml to custom values).
+Volume is controlled as a percentage (0-100%) which is internally remapped to the configured DAC digital volume range. The `flat` preset uses `-103dB` to `-3dB`; other presets may use a narrower range. Volume changes are ramped to reduce audible steps and pops.
 
 ### Setting Volume in YAML
 
@@ -234,10 +378,46 @@ Can be found in the example for [ESP32](/components/pcm5122/yaml/esp32-idf-media
 2. **Verify I2S Configuration**
    - Ensure I2S audio pins are correctly configured
    - Check I2S clock and data line connections
+   - Ensure `bits_per_sample` matches the I2S output format
 
 3. **Volume Level**
    - Confirm volume is not set to 0%
    - Check that volume_min/volume_max are within valid range
+
+4. **Clock Mode**
+   - Try `clock_mode: BCK` if the board does not provide MCLK and `AUTO` is unstable
+   - Keep `clock_mode: AUTO` for the default automatic clock divider configuration
+
+### Crackling, Pops or Clicks
+
+1. **Use a Conservative Preset**
+   ```yaml
+   audio_dac:
+     - platform: pcm5122
+       sound_preset: hifi
+   ```
+
+2. **Lower Maximum Volume**
+   ```yaml
+   volume_max: -6dB
+   ```
+
+3. **Use Smoother Ramp Steps**
+   ```yaml
+   dsp:
+     ramp_step: 0.5dB
+   ```
+
+4. **Increase Auto-Mute Time**
+   ```yaml
+   dsp:
+     auto_mute_time: 106ms
+   ```
+
+5. **Try BCK Clock Reference**
+   ```yaml
+   clock_mode: BCK
+   ```
 
 ### I2C Communication Errors
 
