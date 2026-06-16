@@ -74,6 +74,8 @@ audio_dac:
     volume_min: -60dB       # minimum volume range -60dB, can go down to -103dB
     analog_gain: -6dB       # or -6Db for 1V RMS output, default is 0dB = 2V RMS output
     mixer_mode: STEREO      # MIXER MODE: STEREO, STEREO_INVERSE, LEFT, RIGHT
+    clock_mode: AUTO        # AUTO uses PCM5122 divider autoset; BCK forces BCK as PLL reference
+    bits_per_sample: 16bit  # match ESP-IDF i2s_audio default unless configured otherwise
 
 i2s_audio:
   i2s_lrclk_pin: GPIO15

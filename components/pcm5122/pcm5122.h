@@ -11,13 +11,10 @@ namespace esphome
   namespace pcm5122
   {
 
-    class Pcm5122Component : public audio_dac::AudioDac, public PollingComponent, public i2c::I2CDevice
+    class Pcm5122Component : public audio_dac::AudioDac, public Component, public i2c::I2CDevice
     {
     public:
       void setup() override;
-
-      void loop() override;
-      void update() override;
 
       void dump_config() override;
 
@@ -38,11 +35,18 @@ namespace esphome
       void config_analog_gain(float analog_gain) { this->pcm5122_state_.analog_gain = (int8_t)analog_gain; }
       void config_volume_max(float volume_max) {this->pcm5122_state_.volume_max = (int8_t)(volume_max); }
       void config_volume_min(float volume_min) {this->pcm5122_state_.volume_min = (int8_t)(volume_min); }
+      void config_clock_mode(Pcm5122ClockMode clock_mode) { this->pcm5122_state_.clock_mode = clock_mode; }
+      void config_bits_per_sample(Pcm5122BitsPerSample bits_per_sample) {
+        this->pcm5122_state_.bits_per_sample = bits_per_sample;
+      }
 
     protected:
       GPIOPin *enable_pin_{nullptr};
 
       bool configure_registers_();
+      bool configure_clock_();
+      bool configure_audio_format_();
+      bool ramp_digital_volume_(uint8_t new_volume);
 
       bool get_analog_gain_(int8_t *gain_db);
       bool set_analog_gain_(int8_t gain_db);
@@ -76,13 +80,15 @@ namespace esphome
       struct Pcm5122State
       {
         int8_t analog_gain = 0;     // configured by YAML, default 0dB
-        int8_t volume_max = 24;     // configured by YAML, default 24dB
+        int8_t volume_max = -3;     // configured by YAML, default -3dB
         int8_t volume_min = -103;   // configured by YAML, default -103dB
         MixerMode mixer_mode;     // configured by YAML
+        Pcm5122ClockMode clock_mode = CLOCK_MODE_AUTO;
+        Pcm5122BitsPerSample bits_per_sample = PCM5122_BITS_PER_SAMPLE_16;
         uint8_t raw_volume_max;     // initialised in setup
         uint8_t raw_volume_min;     // initialised in setup
 
-        ControlState control_state; // initialised in setup
+        ControlState control_state = CTRL_PWDN; // initialised in setup
       } pcm5122_state_;
 
       uint8_t i2c_error_{0};
@@ -91,6 +97,7 @@ namespace esphome
       uint16_t count_fast_updates_{0};
 
       uint16_t number_registers_configured_{0};
+      uint8_t current_raw_volume_{0xFF};
 
       // initialised in loop
       uint32_t start_time_;

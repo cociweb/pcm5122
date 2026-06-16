@@ -5,6 +5,7 @@ from esphome.components.audio_dac import AudioDac
 from esphome import pins
 
 from esphome.const import (
+    CONF_BITS_PER_SAMPLE,
     CONF_ID,
     CONF_ENABLE_PIN,
 )
@@ -17,9 +18,10 @@ CONF_MIXER_MODE = "mixer_mode"
 CONF_VOLUME_MIN = "volume_min"
 CONF_VOLUME_MAX = "volume_max"
 CONF_PCM5122_ID = "pcm5122_id"
+CONF_CLOCK_MODE = "clock_mode"
 
 pcm5122_ns = cg.esphome_ns.namespace("pcm5122")
-Pcm5122Component = pcm5122_ns.class_("Pcm5122Component", AudioDac, cg.PollingComponent, i2c.I2CDevice)
+Pcm5122Component = pcm5122_ns.class_("Pcm5122Component", AudioDac, cg.Component, i2c.I2CDevice)
 
 MixerMode = pcm5122_ns.enum("MixerMode")
 MIXER_MODES = {
@@ -29,7 +31,21 @@ MIXER_MODES = {
     "LEFT"           : MixerMode.LEFT,
 }
 
+Pcm5122ClockMode = pcm5122_ns.enum("Pcm5122ClockMode")
+CLOCK_MODES = {
+    "AUTO": Pcm5122ClockMode.CLOCK_MODE_AUTO,
+    "BCK": Pcm5122ClockMode.CLOCK_MODE_BCK,
+}
+
+Pcm5122BitsPerSample = pcm5122_ns.enum("Pcm5122BitsPerSample")
+BITS_PER_SAMPLE = {
+    16: Pcm5122BitsPerSample.PCM5122_BITS_PER_SAMPLE_16,
+    24: Pcm5122BitsPerSample.PCM5122_BITS_PER_SAMPLE_24,
+    32: Pcm5122BitsPerSample.PCM5122_BITS_PER_SAMPLE_32,
+}
+
 ANALOG_GAINS = [-6,  0]
+_validate_bits = cv.float_with_unit("bits", "bit")
 
 def validate_config(config):
     if config[CONF_ANALOG_GAIN] not in ANALOG_GAINS:
@@ -49,7 +65,13 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_MIXER_MODE, default="STEREO"): cv.enum(
                         MIXER_MODES, upper=True
             ),
-            cv.Optional(CONF_VOLUME_MAX, default="24dB"): cv.All(
+            cv.Optional(CONF_CLOCK_MODE, default="AUTO"): cv.enum(
+                        CLOCK_MODES, upper=True
+            ),
+            cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
+                        _validate_bits, cv.enum(BITS_PER_SAMPLE)
+            ),
+            cv.Optional(CONF_VOLUME_MAX, default="-3dB"): cv.All(
                         cv.decibel, cv.int_range(-103, 24)
             ),
             cv.Optional(CONF_VOLUME_MIN, default="-103dB"): cv.All(
@@ -57,7 +79,7 @@ CONFIG_SCHEMA = cv.All(
             ),
         }
     )
-    .extend(cv.polling_component_schema("1s"))
+    .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x4D))
     .add_extra(validate_config),
     cv.only_with_esp_idf,
@@ -75,5 +97,7 @@ async def to_code(config):
     
     cg.add(var.config_analog_gain(config[CONF_ANALOG_GAIN]))
     cg.add(var.config_mixer_mode(config[CONF_MIXER_MODE]))
+    cg.add(var.config_clock_mode(config[CONF_CLOCK_MODE]))
+    cg.add(var.config_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.config_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.config_volume_min(config[CONF_VOLUME_MIN]))

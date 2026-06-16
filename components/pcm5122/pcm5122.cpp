@@ -13,9 +13,11 @@ namespace esphome
     static const char *const MIXER_MODE = "Mixer Mode";
 
     static const char* const MIXER_MODE_TEXT[] = {"STEREO", "STEREO_INVERSE", "RIGHT", "LEFT"};
+    static const char* const CLOCK_MODE_TEXT[] = {"AUTO", "BCK"};
 
-    // maximum delay allowed in "pcm5122_minimal.h" used in configure_registers()
-    static const uint8_t ESPHOME_MAXIMUM_DELAY = 5; // milliseconds
+    static const uint8_t UNMUTE_DELAY_MS = 50;
+    static const uint8_t VOLUME_RAMP_DELAY_MS = 2;
+    static const uint8_t VOLUME_RAMP_STEP = 2;
 
     void Pcm5122Component::setup()
     {
@@ -32,39 +34,42 @@ namespace esphome
       {
         this->error_code_ = CONFIGURATION_FAILED;
         this->mark_failed();
+        return;
       }
 
       // rescale -103db to 24db digital volume range to register digital volume range 254 to 0
       this->pcm5122_state_.raw_volume_max = (uint8_t)((this->pcm5122_state_.volume_max - 24) * -2);
       this->pcm5122_state_.raw_volume_min = (uint8_t)((this->pcm5122_state_.volume_min - 24) * -2);
+      this->current_raw_volume_ = this->pcm5122_state_.raw_volume_max;
+      this->set_digital_volume_(this->current_raw_volume_);
     }
 
     bool Pcm5122Component::configure_registers_()
     {
-      uint16_t i = 0;
-      uint16_t counter = 0;
-      uint16_t number_configurations = sizeof(pcm51xx_init_seq) / sizeof(pcm51xx_init_seq[0]);
+      if (!this->set_page_(PCM51XX_PAGE_ZERO))
+        return false;
 
-      while (i < number_configurations)
-      {
-        switch (pcm51xx_init_seq[i].offset)
-        {
-        case PCM5122_CFG_META_DELAY:
-          if (pcm51xx_init_seq[i].value > ESPHOME_MAXIMUM_DELAY)
-            return false;
-          delay(pcm51xx_init_seq[i].value);
-          break;
-        default:
-          if (!this->pcm5122_write_byte_(pcm51xx_init_seq[i].offset, pcm51xx_init_seq[i].value))
-            return false;
-          counter++;
-          break;
-        }
-        i++;
-      }
-      this->number_registers_configured_ = counter;
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_MUTE, PCM51XX_REG_VALUE_MUTE))
+        return false;
+      this->is_muted_ = true;
+      this->number_registers_configured_++;
+
+      if (!this->pcm5122_write_byte_(PCM5122_REG_RESET, PCM5122_RESET_MODULES))
+        return false;
+      this->number_registers_configured_++;
+      delay(20);
+
+      if (!this->pcm5122_write_byte_(PCM5122_REG_RESET, 0x00))
+        return false;
+      this->number_registers_configured_++;
 
       if (!this->set_deep_sleep_off_())
+        return false;
+
+      if (!this->configure_audio_format_())
+        return false;
+
+      if (!this->configure_clock_())
         return false;
 
       if (!this->set_mixer_mode_(this->pcm5122_state_.mixer_mode))
@@ -81,12 +86,74 @@ namespace esphome
       return true;
     }
 
-    void Pcm5122Component::loop()
+    bool Pcm5122Component::configure_clock_()
     {
+      uint8_t err_detect = 0;
+      if (!this->pcm5122_read_byte_(PCM5122_REG_ERROR_DETECT, &err_detect))
+      {
+        ESP_LOGE(TAG, "%s read clock error detection", ERROR);
+        return false;
+      }
+
+      err_detect |= PCM5122_ERROR_DETECT_IGNORE_CLKHALT;
+      err_detect &= ~PCM5122_ERROR_DETECT_DISABLE_DIV_AUTOSET;
+
+      if (!this->pcm5122_write_byte_(PCM5122_REG_ERROR_DETECT, err_detect))
+      {
+        ESP_LOGE(TAG, "%s write clock error detection", ERROR);
+        return false;
+      }
+      this->number_registers_configured_++;
+
+      if (this->pcm5122_state_.clock_mode == CLOCK_MODE_BCK)
+      {
+        uint8_t pll_ref = 0;
+        if (!this->pcm5122_read_byte_(PCM5122_REG_PLL_REF, &pll_ref))
+        {
+          ESP_LOGE(TAG, "%s read PLL reference", ERROR);
+          return false;
+        }
+
+        pll_ref &= ~PCM5122_PLL_REF_MASK;
+        pll_ref |= PCM5122_PLL_REF_SOURCE_BCK;
+
+        if (!this->pcm5122_write_byte_(PCM5122_REG_PLL_REF, pll_ref))
+        {
+          ESP_LOGE(TAG, "%s write PLL reference", ERROR);
+          return false;
+        }
+        this->number_registers_configured_++;
+      }
+
+      return true;
     }
 
-    void Pcm5122Component::update()
+    bool Pcm5122Component::configure_audio_format_()
     {
+      uint8_t alen = PCM5122_AUDIO_FORMAT_ALEN_16BIT;
+      switch (this->pcm5122_state_.bits_per_sample)
+      {
+      case PCM5122_BITS_PER_SAMPLE_16:
+        alen = PCM5122_AUDIO_FORMAT_ALEN_16BIT;
+        break;
+      case PCM5122_BITS_PER_SAMPLE_24:
+        alen = PCM5122_AUDIO_FORMAT_ALEN_24BIT;
+        break;
+      case PCM5122_BITS_PER_SAMPLE_32:
+        alen = PCM5122_AUDIO_FORMAT_ALEN_32BIT;
+        break;
+      default:
+        return false;
+      }
+
+      if (!this->pcm5122_write_byte_(PCM5122_REG_AUDIO_FORMAT, PCM5122_AUDIO_FORMAT_I2S | alen))
+      {
+        ESP_LOGE(TAG, "%s write audio format", ERROR);
+        return false;
+      }
+
+      this->number_registers_configured_++;
+      return true;
     }
 
     void Pcm5122Component::dump_config()
@@ -106,15 +173,18 @@ namespace esphome
                       "  Analog Gain: %idB\n"
                       "  Maximum Volume: %idB\n"
                       "  Minimum Volume: %idB\n"
-                      "  Mixer Mode: %s\n",
+                      "  Mixer Mode: %s\n"
+                      "  Clock Mode: %s\n"
+                      "  Bits per Sample: %u\n",
   
                       this->number_registers_configured_,
                       this->pcm5122_state_.analog_gain,
                       this->pcm5122_state_.volume_max,
                       this->pcm5122_state_.volume_min,
-                      MIXER_MODE_TEXT[this->pcm5122_state_.mixer_mode]
+                      MIXER_MODE_TEXT[this->pcm5122_state_.mixer_mode],
+                      CLOCK_MODE_TEXT[this->pcm5122_state_.clock_mode],
+                      this->pcm5122_state_.bits_per_sample
         );
-        LOG_UPDATE_INTERVAL(this);
         break;
       }
     }
@@ -130,6 +200,8 @@ namespace esphome
       ESP_LOGD(TAG, "Mute OFF entered");
       if (!this->is_muted_)
         return true;
+
+      delay(UNMUTE_DELAY_MS);
 
       if (!this->pcm5122_write_byte_(PCM51XX_REG_MUTE, PCM51XX_REG_VALUE_UNMUTE)) {
         ESP_LOGD(TAG, "%s unmute", ERROR);
@@ -159,8 +231,9 @@ namespace esphome
 
     float Pcm5122Component::volume()
     {
-      uint8_t raw_volume;
-      get_digital_volume_(&raw_volume);
+      uint8_t raw_volume = this->current_raw_volume_;
+      if (raw_volume == 0xFF && !get_digital_volume_(&raw_volume))
+        return 0.0f;
 
       return remap<float, uint8_t>(raw_volume, this->pcm5122_state_.raw_volume_min,
                                    this->pcm5122_state_.raw_volume_max,
@@ -173,11 +246,40 @@ namespace esphome
       uint8_t raw_volume = remap<uint8_t, float>(new_volume, 0.0f, 1.0f,
                                                  this->pcm5122_state_.raw_volume_min,
                                                  this->pcm5122_state_.raw_volume_max);
-      if (!this->set_digital_volume_(raw_volume))
+      if (!this->ramp_digital_volume_(raw_volume))
         return false;
 
       int8_t dB = -(raw_volume / 2) + 24;
       ESP_LOGD(TAG, "Volume: %idB", dB);
+      return true;
+    }
+
+    bool Pcm5122Component::ramp_digital_volume_(uint8_t new_volume)
+    {
+      if (this->current_raw_volume_ == 0xFF)
+      {
+        if (!this->get_digital_volume_(&this->current_raw_volume_))
+          this->current_raw_volume_ = new_volume;
+      }
+
+      while (this->current_raw_volume_ != new_volume)
+      {
+        if (this->current_raw_volume_ < new_volume)
+        {
+          uint8_t delta = new_volume - this->current_raw_volume_;
+          this->current_raw_volume_ += delta > VOLUME_RAMP_STEP ? VOLUME_RAMP_STEP : delta;
+        }
+        else
+        {
+          uint8_t delta = this->current_raw_volume_ - new_volume;
+          this->current_raw_volume_ -= delta > VOLUME_RAMP_STEP ? VOLUME_RAMP_STEP : delta;
+        }
+
+        if (!this->set_digital_volume_(this->current_raw_volume_))
+          return false;
+        delay(VOLUME_RAMP_DELAY_MS);
+      }
+
       return true;
     }
 
@@ -285,6 +387,7 @@ namespace esphome
         return false;
       if (!this->pcm5122_write_byte_(PCM51XX_REG_VOL_R, raw_volume))
         return false;
+      this->current_raw_volume_ = raw_volume;
       return true;
     }
 
