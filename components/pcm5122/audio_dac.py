@@ -82,7 +82,6 @@ CONFIG_SCHEMA = cv.All(
     .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x4D))
     .add_extra(validate_config),
-    cv.only_with_esp_idf,
     cv.only_on_esp32,
 )
 
