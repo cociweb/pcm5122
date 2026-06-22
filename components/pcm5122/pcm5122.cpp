@@ -17,6 +17,11 @@ namespace esphome
     // maximum delay allowed in "pcm5122_minimal.h" used in configure_registers()
     static const uint8_t ESPHOME_MAXIMUM_DELAY = 5; // milliseconds
 
+    // Set to true once the DSP coefficient RAM has been written successfully.
+    // Prevents re-writing the coefficients on subsequent set_process_flow()
+    // calls at runtime — the PCM5122 coefficient RAM survives standby cycles.
+    static bool s_dsp_coeff_written = false;
+
     void Pcm5122Component::setup()
     {
       ESP_LOGCONFIG(TAG, "Running setup");
@@ -27,6 +32,25 @@ namespace esphome
         delay(10);
         this->enable_pin_->digital_write(true);
       }
+
+      // Reset DAC using PCM51XX_REG_RESET register
+      // Write 0x11 to reset register, then clear reset flags
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_RESET, 0x11)) {
+        ESP_LOGE(TAG, "%s reset PCM5122", ERROR);
+        this->error_code_ = CONFIGURATION_FAILED;
+        this->mark_failed();
+        return;
+      }
+      delay(100); // Allow reset to complete
+
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_RESET, 0x00)) {
+        ESP_LOGE(TAG, "%s clear reset flags", ERROR);
+        this->error_code_ = CONFIGURATION_FAILED;
+        this->mark_failed();
+        return;
+      }
+      
+      delay(100); // Allow part to stabilise
 
       if (!configure_registers_())
       {
@@ -41,28 +65,29 @@ namespace esphome
 
     bool Pcm5122Component::configure_registers_()
     {
-      uint16_t i = 0;
-      uint16_t counter = 0;
-      uint16_t number_configurations = sizeof(pcm51xx_init_seq) / sizeof(pcm51xx_init_seq[0]);
-
-      while (i < number_configurations)
       {
-        switch (pcm51xx_init_seq[i].offset)
+        // --- Write basic codec initialisation sequence ---
+        uint16_t reg_count = sizeof(pcm51xx_init_seq) / sizeof(pcm51xx_init_seq[0]);
+        for (uint16_t i = 0; i < reg_count; i++)
         {
-        case PCM5122_CFG_META_DELAY:
-          if (pcm51xx_init_seq[i].value > ESPHOME_MAXIMUM_DELAY)
-            return false;
-          delay(pcm51xx_init_seq[i].value);
-          break;
-        default:
-          if (!this->pcm5122_write_byte_(pcm51xx_init_seq[i].offset, pcm51xx_init_seq[i].value))
-            return false;
-          counter++;
-          break;
+            if (!this->pcm5122_write_byte_(pcm51xx_init_seq[i].offset, pcm51xx_init_seq[i].value))
+              return false;
         }
-        i++;
+        ESP_LOGD(TAG, "%s: wrote %d initialisation registers", __func__, reg_count);
       }
-      this->number_registers_configured_ = counter;
+
+      {
+        // --- Write DSP CRAM contents ---
+        uint16_t reg_count = sizeof(pcm51xx_dsp_coeff_seq) / sizeof(pcm51xx_dsp_coeff_seq[0]);
+        for (uint16_t i = 0; i < reg_count; i++)
+        {
+            if (!this->pcm5122_write_byte_(pcm51xx_dsp_coeff_seq[i].offset, pcm51xx_dsp_coeff_seq[i].value))
+              return false;
+        }
+        s_dsp_coeff_written = true;
+
+        ESP_LOGD(TAG, "%s: wrote %d DSP registers", __func__, reg_count);
+      }
 
       if (!this->set_deep_sleep_off_())
         return false;
@@ -75,6 +100,14 @@ namespace esphome
 
       if (!this->set_state_(CTRL_PLAY))
         return false;
+
+      // Read and cache the current process flow from hardware
+      uint8_t flow;
+      if (this->pcm5122_read_byte_(PCM51XX_REG_PROC_FLOW, &flow)) {
+        this->pcm5122_state_.process_flow = flow;
+      } else {
+        this->pcm5122_state_.process_flow = PCM51XX_PROC_FLOW_1;
+      }
 
       // initialise to now
       this->start_time_ = millis();
@@ -107,8 +140,7 @@ namespace esphome
                       "  Maximum Volume: %idB\n"
                       "  Minimum Volume: %idB\n"
                       "  Mixer Mode: %s\n",
-  
-                      this->number_registers_configured_,
+
                       this->pcm5122_state_.analog_gain,
                       this->pcm5122_state_.volume_max,
                       this->pcm5122_state_.volume_min,
@@ -331,6 +363,42 @@ namespace esphome
       return true;
     }
 
+    bool Pcm5122Component::set_process_flow(uint8_t flow)
+    {
+      // Validate flow value (only allow documented flows)
+      if (flow != PCM51XX_PROC_FLOW_1 &&
+          flow != PCM51XX_PROC_FLOW_2 &&
+          flow != PCM51XX_PROC_FLOW_3 &&
+          flow != PCM51XX_PROC_FLOW_5 &&
+          flow != PCM51XX_PROC_FLOW_7) {
+        ESP_LOGE(TAG, "%s invalid process flow: %d", ERROR, flow);
+        return false;
+      }
+
+      // Enter standby before changing process flow to avoid audio glitches
+      if (!this->set_state_(CTRL_STBY)) {
+        ESP_LOGE(TAG, "%s enter standby for process flow change", ERROR);
+        return false;
+      }
+
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_PROC_FLOW, flow)) {
+        ESP_LOGE(TAG, "%s set process flow %d", ERROR, flow);
+        // Exit standby even on failure
+        this->set_state_(CTRL_PLAY);
+        return false;
+      }
+
+      // Exit standby — DSP picks up the new process flow atomically
+      if (!this->set_state_(CTRL_PLAY)) {
+        ESP_LOGE(TAG, "%s exit standby after process flow change", ERROR);
+        return false;
+      }
+
+      this->pcm5122_state_.process_flow = flow;
+      ESP_LOGD(TAG, "Process flow set to %d", flow);
+      return true;
+    }
+
     bool Pcm5122Component::get_state_(ControlState *state)
     {
       *state = this->pcm5122_state_.control_state;
@@ -397,6 +465,122 @@ namespace esphome
         this->i2c_error_ = (uint8_t)error_code;
         return false;
       }
+      return true;
+    }
+
+    // ======================== Biquad Coefficient Writing ========================
+
+    /*
+     * PCM5122 EQ BQ band address table.
+     * Each band: 5 coefficients × 4 bytes = 20 bytes.
+     * band 0..3: page 44 (0x2C), band 4..5: page 45 (0x2D).
+     */
+    static const struct {
+      uint8_t page;
+      uint8_t base_offset;
+    } BQ_BAND_ADDR[6] = {
+      {0x2C, 0x30},  /* band 0 (BQ1), c10..c14 */
+      {0x2C, 0x44},  /* band 1 (BQ2), c15..c19 */
+      {0x2C, 0x58},  /* band 2 (BQ3), c20..c24 */
+      {0x2C, 0x6C},  /* band 3 (BQ4), c25..c29 */
+      {0x2D, 0x08},  /* band 4 (BQ5), c30..c34 */
+      {0x2D, 0x1C},  /* band 5 (BQ6), c35..c39 */
+    };
+
+    /*
+     * Compute the exact (page, offset) for coefficient ci of a band.
+     * Uses the same formula as pcm51xx_bq_coeff_addr() in pcm51xx_bq_addr.h.
+     */
+    static void bq_coeff_addr_(uint8_t band, int ci, uint8_t *page_out, uint8_t *offset_out) {
+      uint16_t abs = (uint16_t)BQ_BAND_ADDR[band].base_offset + (uint16_t)(ci * 4);
+      if (abs >= 0x80u) {
+        *page_out   = (uint8_t)(BQ_BAND_ADDR[band].page + 1u);
+        *offset_out = (uint8_t)(abs - 0x78u);
+      } else {
+        *page_out   = BQ_BAND_ADDR[band].page;
+        *offset_out = (uint8_t)abs;
+      }
+    }
+
+    /*
+     * Convert float in range (-1, +1) to PCM5122 Q3.23 register format.
+     * Returns a 32-bit value where bits[31:8] contain the 24-bit coefficient,
+     * bits[7:0] are always 0x00.
+     */
+    static uint32_t float_to_q323_(float value) {
+      if (value > 0.9999999f) value = 0.9999999f;
+      if (value < -1.0f) value = -1.0f;
+      int32_t q = (int32_t)(value * (float)(1u << 23));
+      return (uint32_t)q << 8;
+    }
+
+    bool Pcm5122Component::write_bq_coefficients(uint8_t band, const float coeff_f[5]) {
+      if (band >= 6) {
+        ESP_LOGE(TAG, "Invalid BQ band: %d", band);
+        return false;
+      }
+
+      // Enter standby
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_STATE, CTRL_STBY)) {
+        ESP_LOGE(TAG, "Failed to enter standby for BQ write");
+        return false;
+      }
+
+      bool success = true;
+      uint8_t current_page = 0xFF;  // sentinel — force first page select
+
+      for (int ci = 0; ci < 5 && success; ci++) {
+        uint8_t pg, off;
+        bq_coeff_addr_(band, ci, &pg, &off);
+
+        // Select page if needed
+        if (pg != current_page) {
+          if (!this->set_page_(pg)) {
+            ESP_LOGE(TAG, "Failed to select page 0x%02x for BQ band %d ci %d", pg, band, ci);
+            success = false;
+            break;
+          }
+          current_page = pg;
+        }
+
+        // Convert coefficient to Q3.23 big-endian register format
+        uint32_t value = float_to_q323_(coeff_f[ci]);
+        uint8_t be[4] = {
+          (uint8_t)(value >> 24),
+          (uint8_t)(value >> 16),
+          (uint8_t)(value >>  8),
+          (uint8_t)(value),
+        };
+
+        // Write 4 bytes (MSByte first) to consecutive register addresses
+        for (int bi = 0; bi < 4 && success; bi++) {
+          if (!this->pcm5122_write_byte_(off + (uint8_t)bi, be[bi])) {
+            ESP_LOGE(TAG, "Failed to write BQ band %d ci %d byte %d", band, ci, bi);
+            success = false;
+          }
+        }
+
+        ESP_LOGD(TAG, "BQ band %d ci %d pg=0x%02x off=0x%02x wrote [0x%02x 0x%02x 0x%02x 0x%02x] (%.7f)",
+                 band, ci, pg, off, be[0], be[1], be[2], be[3], coeff_f[ci]);
+      }
+
+      // Restore page 0
+      if (!this->set_page_(PCM51XX_PAGE_ZERO)) {
+        ESP_LOGW(TAG, "Failed to restore page 0 after BQ write");
+      }
+
+      // Exit standby
+      if (!this->pcm5122_write_byte_(PCM51XX_REG_STATE, CTRL_PLAY)) {
+        ESP_LOGE(TAG, "Failed to exit standby after BQ write");
+        return false;
+      }
+
+      if (!success) {
+        ESP_LOGE(TAG, "BQ coefficient write failed for band %d", band);
+        return false;
+      }
+
+      ESP_LOGD(TAG, "BQ band %d coefficients written successfully", band);
       return true;
     }
 

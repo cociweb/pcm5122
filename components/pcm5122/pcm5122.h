@@ -39,6 +39,12 @@ namespace esphome
       void config_volume_max(float volume_max) {this->pcm5122_state_.volume_max = (int8_t)(volume_max); }
       void config_volume_min(float volume_min) {this->pcm5122_state_.volume_min = (int8_t)(volume_min); }
 
+      uint8_t get_process_flow() { return this->pcm5122_state_.process_flow; }
+      bool set_process_flow(uint8_t flow);
+
+      // DSP biquad coefficient writing
+      bool write_bq_coefficients(uint8_t band, const float coeff_f[5]);
+
     protected:
       GPIOPin *enable_pin_{nullptr};
 
@@ -83,14 +89,13 @@ namespace esphome
         uint8_t raw_volume_min;     // initialised in setup
 
         ControlState control_state; // initialised in setup
+        uint8_t process_flow = PCM51XX_PROC_FLOW_5; // initialised in setup
       } pcm5122_state_;
 
       uint8_t i2c_error_{0};
       uint8_t loop_counter_{0};
 
       uint16_t count_fast_updates_{0};
-
-      uint16_t number_registers_configured_{0};
 
       // initialised in loop
       uint32_t start_time_;
